@@ -1,5 +1,6 @@
 import sys
 import math
+import random
 from collections import deque
 import pygame
 import pymunk
@@ -298,7 +299,10 @@ class PlinkoGame:
 
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_SPACE:
-                    self.drop_ball(WIDTH // 2)
+                    if event.mod & pygame.KMOD_SHIFT:
+                        self.drop_ball(random.randint(self.ball_radius, WIDTH - self.ball_radius))
+                    else:
+                        self.drop_ball(WIDTH // 2)
                 elif event.key == pygame.K_r:
                     self.reset_ball()
                 elif event.key == pygame.K_c:
