@@ -1,5 +1,6 @@
 import sys
 import math
+from collections import deque
 import pygame
 import pymunk
 import pymunk.pygame_util
@@ -35,19 +36,39 @@ BUCKET_HIT_COLOR    = (255, 200,   0)
 SCORE_TEXT_COLOR    = (255, 230,  80)
 UI_TEXT_COLOR       = (180, 180, 220)
 
+# ── Sidebar ──────────────────────────────────────────────────────────────────
+SIDEBAR_WIDTH        = 240
+TOTAL_WIDTH          = WIDTH + SIDEBAR_WIDTH        # 1040
+SIDEBAR_X            = WIDTH                        # x=800
+SIDEBAR_BG_COLOR     = (20, 20, 38)
+SIDEBAR_BORDER_COLOR = (60, 60, 100)
+SIDEBAR_HEADER_COLOR = (100, 100, 180)
+SIDEBAR_TEXT_COLOR   = (160, 160, 210)
+SIDEBAR_VALUE_COLOR  = (255, 230, 80)
+SIDEBAR_BTN_COLOR    = (45, 45, 80)
+SIDEBAR_BTN_HOVER    = (65, 65, 110)
+SIDEBAR_BTN_TEXT     = (200, 200, 240)
+SIDEBAR_DIVIDER      = (50, 50, 90)
+MAX_MESSAGES         = 12
+
+ELASTICITY_MIN, ELASTICITY_MAX, ELASTICITY_STEP = 0.1, 1.5, 0.05
+GRAVITY_MIN,    GRAVITY_MAX,    GRAVITY_STEP    = 100, 2000, 50
+DAMPING_MIN,    DAMPING_MAX,    DAMPING_STEP    = 0.80, 1.00, 0.01
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 class PlinkoGame:
 
     def __init__(self):
         pygame.init()
-        self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
+        self.screen = pygame.display.set_mode((TOTAL_WIDTH, HEIGHT))
         pygame.display.set_caption("Plinko")
         self.clock = pygame.time.Clock()
 
         self.font_large  = pygame.font.SysFont("Arial", 42, bold=True)
         self.font_medium = pygame.font.SysFont("Arial", 22, bold=True)
         self.font_small  = pygame.font.SysFont("Arial", 16)
+        self.font_tiny   = pygame.font.SysFont("Arial", 13)
 
         # pymunk space
         self.space = pymunk.Space()
@@ -60,6 +81,49 @@ class PlinkoGame:
         self.ball_shape: pymunk.Shape | None = None
         self.score:          int | None = None
         self.scored_bucket:  int | None = None
+
+        # sidebar state
+        self.messages: deque[str] = deque(maxlen=MAX_MESSAGES)
+        self.ball_elasticity  = 0.75
+        self.gravity_strength = 900
+        self.damping_val      = 0.99
+
+        # settings controls: each dict describes one row
+        self.settings_controls = [
+            {
+                "label":    "Elasticity",
+                "sublabel": "next ball",
+                "attr":     "ball_elasticity",
+                "min":      ELASTICITY_MIN,
+                "max":      ELASTICITY_MAX,
+                "step":     ELASTICITY_STEP,
+                "fmt":      "{:.2f}",
+                "rect_dec": pygame.Rect(SIDEBAR_X + 10, 340, 40, 30),
+                "rect_inc": pygame.Rect(SIDEBAR_X + 190, 340, 40, 30),
+            },
+            {
+                "label":    "Gravity",
+                "sublabel": "live",
+                "attr":     "gravity_strength",
+                "min":      GRAVITY_MIN,
+                "max":      GRAVITY_MAX,
+                "step":     GRAVITY_STEP,
+                "fmt":      "{:.0f}",
+                "rect_dec": pygame.Rect(SIDEBAR_X + 10, 415, 40, 30),
+                "rect_inc": pygame.Rect(SIDEBAR_X + 190, 415, 40, 30),
+            },
+            {
+                "label":    "Damping",
+                "sublabel": "live",
+                "attr":     "damping_val",
+                "min":      DAMPING_MIN,
+                "max":      DAMPING_MAX,
+                "step":     DAMPING_STEP,
+                "fmt":      "{:.2f}",
+                "rect_dec": pygame.Rect(SIDEBAR_X + 10, 490, 40, 30),
+                "rect_inc": pygame.Rect(SIDEBAR_X + 190, 490, 40, 30),
+            },
+        ]
 
         self._setup_walls()
         self._setup_buckets()
@@ -103,7 +167,6 @@ class PlinkoGame:
         for i in range(NUM_BUCKETS):
             x_left  = i * bucket_w
             x_right = (i + 1) * bucket_w
-            x_center = (x_left + x_right) / 2
             # sensor box: spans full bucket width, bottom 80 px
             body  = pymunk.Body(body_type=pymunk.Body.STATIC)
             shape = pymunk.Poly.create_box_bb(
@@ -124,8 +187,14 @@ class PlinkoGame:
                     if self.scored_bucket is None:   # record only first hit
                         self.scored_bucket = idx
                         self.score = BUCKET_SCORES[idx]
+                        self._post_message(f"Scored {self.score} pts!")
 
         self.space.on_collision(1, 2, begin=begin)
+
+    # ── Message log ───────────────────────────────────────────────────────────
+
+    def _post_message(self, text: str):
+        self.messages.appendleft(text)  # newest at top
 
     # ── Peg management ────────────────────────────────────────────────────────
 
@@ -143,6 +212,7 @@ class PlinkoGame:
         shape.elasticity = 0.8
         shape.friction    = 0.5
         self.space.add(body, shape)
+        self._post_message("Peg placed")
         self.pegs.append((body, shape))
 
     def remove_nearest_peg(self, pygame_pos: tuple[int, int]):
@@ -160,11 +230,12 @@ class PlinkoGame:
         if best_dist <= 30:
             body, shape = self.pegs.pop(best_idx)
             self.space.remove(body, shape)
+            self._post_message("Peg removed")
 
     # ── Ball management ───────────────────────────────────────────────────────
 
     def drop_ball(self, x_pygame: int):
-        self.reset_ball()
+        self.reset_ball(silent=True)
         # Drop from y=60 in pygame → near top of screen
         pygame_pos = (x_pygame, DROP_ZONE_HEIGHT // 2 + 10)
         pm_pos = pymunk.pygame_util.from_pygame(pygame_pos, self.screen)
@@ -173,18 +244,21 @@ class PlinkoGame:
         body   = pymunk.Body(BALL_MASS, moment)
         body.position = pm_pos
         shape = pymunk.Circle(body, BALL_RADIUS)
-        shape.elasticity     = 0.75
+        shape.elasticity     = self.ball_elasticity
         shape.friction        = 0.4
         shape.collision_type  = 1
         self.space.add(body, shape)
         self.ball_body  = body
         self.ball_shape = shape
+        self._post_message("Ball dropped")
 
-    def reset_ball(self):
+    def reset_ball(self, silent: bool = False):
         if self.ball_body is not None:
             self.space.remove(self.ball_body, self.ball_shape)
             self.ball_body  = None
             self.ball_shape = None
+            if not silent:
+                self._post_message("Ball reset")
         self.score         = None
         self.scored_bucket = None
 
@@ -197,13 +271,17 @@ class PlinkoGame:
 
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 mx, my = event.pos
-                if event.button == 1:  # left-click
-                    if my < DROP_ZONE_HEIGHT:
-                        self.drop_ball(mx)
-                    else:
-                        self.add_peg(event.pos)
-                elif event.button == 3:  # right-click
-                    self.remove_nearest_peg(event.pos)
+                if mx >= SIDEBAR_X:                  # sidebar area
+                    if event.button == 1:
+                        self._handle_sidebar_click(mx, my)
+                else:                                # game board area (unchanged)
+                    if event.button == 1:  # left-click
+                        if my < DROP_ZONE_HEIGHT:
+                            self.drop_ball(mx)
+                        else:
+                            self.add_peg(event.pos)
+                    elif event.button == 3:  # right-click
+                        self.remove_nearest_peg(event.pos)
 
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_SPACE:
@@ -214,10 +292,31 @@ class PlinkoGame:
                     for body, shape in self.pegs:
                         self.space.remove(body, shape)
                     self.pegs.clear()
+                    self._post_message("All pegs cleared")
                 elif event.key == pygame.K_ESCAPE:
                     return False
 
         return True
+
+    # ── Sidebar interaction ───────────────────────────────────────────────────
+
+    def _handle_sidebar_click(self, mx: int, my: int):
+        for ctrl in self.settings_controls:
+            if ctrl["rect_dec"].collidepoint(mx, my):
+                val = round(getattr(self, ctrl["attr"]) - ctrl["step"], 4)
+                setattr(self, ctrl["attr"], max(ctrl["min"], val))
+            elif ctrl["rect_inc"].collidepoint(mx, my):
+                val = round(getattr(self, ctrl["attr"]) + ctrl["step"], 4)
+                setattr(self, ctrl["attr"], min(ctrl["max"], val))
+            else:
+                continue
+            # apply live physics changes
+            self.space.gravity = (0, self.gravity_strength)
+            self.space.damping = self.damping_val
+            label = ctrl["label"].title()
+            fmt_val = ctrl["fmt"].format(getattr(self, ctrl["attr"]))
+            self._post_message(f"{label}: {fmt_val}")
+            break
 
     # ── Physics update ────────────────────────────────────────────────────────
 
@@ -230,7 +329,8 @@ class PlinkoGame:
         if self.ball_body is not None:
             bx, by = pymunk.pygame_util.to_pygame(self.ball_body.position, self.screen)
             if by > HEIGHT + 50:
-                self.reset_ball()
+                self._post_message("Ball fell out")
+                self.reset_ball(silent=True)
 
     # ── Rendering ─────────────────────────────────────────────────────────────
 
@@ -241,6 +341,7 @@ class PlinkoGame:
         self._draw_ball()
         self._draw_bucket_area()
         self._draw_ui()
+        self._draw_sidebar()
         pygame.display.flip()
 
     def _draw_drop_zone(self):
@@ -313,6 +414,71 @@ class PlinkoGame:
         if self.score is not None:
             banner = self.font_large.render(f"+ {self.score} points!", True, SCORE_TEXT_COLOR)
             self.screen.blit(banner, banner.get_rect(center=(WIDTH // 2, DROP_ZONE_HEIGHT // 2)))
+
+    # ── Sidebar rendering ─────────────────────────────────────────────────────
+
+    def _draw_sidebar(self):
+        # Background fill
+        sidebar_rect = pygame.Rect(SIDEBAR_X, 0, SIDEBAR_WIDTH, HEIGHT)
+        pygame.draw.rect(self.screen, SIDEBAR_BG_COLOR, sidebar_rect)
+        # Left-edge border line
+        pygame.draw.line(self.screen, SIDEBAR_BORDER_COLOR,
+                         (SIDEBAR_X, 0), (SIDEBAR_X, HEIGHT), 2)
+        self._draw_sidebar_messages()
+        self._draw_sidebar_settings()
+
+    def _draw_sidebar_messages(self):
+        # Header
+        header = self.font_small.render("MESSAGES", True, SIDEBAR_HEADER_COLOR)
+        self.screen.blit(header, (SIDEBAR_X + 10, 10))
+        pygame.draw.line(self.screen, SIDEBAR_DIVIDER,
+                         (SIDEBAR_X + 5, 30), (SIDEBAR_X + SIDEBAR_WIDTH - 5, 30), 1)
+
+        # Messages — newest first, fade older entries
+        for i, msg in enumerate(self.messages):
+            alpha = max(80, 210 - i * 11)
+            color = (alpha, alpha, min(255, alpha + 40))
+            text = self.font_tiny.render(msg, True, color)
+            self.screen.blit(text, (SIDEBAR_X + 10, 38 + i * 18))
+
+    def _draw_sidebar_settings(self):
+        # Header
+        header = self.font_small.render("SETTINGS", True, SIDEBAR_HEADER_COLOR)
+        self.screen.blit(header, (SIDEBAR_X + 10, 300))
+        pygame.draw.line(self.screen, SIDEBAR_DIVIDER,
+                         (SIDEBAR_X + 5, 320), (SIDEBAR_X + SIDEBAR_WIDTH - 5, 320), 1)
+
+        mouse_pos = pygame.mouse.get_pos()
+
+        for ctrl in self.settings_controls:
+            rect_dec = ctrl["rect_dec"]
+            rect_inc = ctrl["rect_inc"]
+            # row top from dec button's y
+            row_y = rect_dec.y
+
+            # Label + sublabel
+            lbl = self.font_tiny.render(ctrl["label"], True, SIDEBAR_TEXT_COLOR)
+            self.screen.blit(lbl, (SIDEBAR_X + 60, row_y - 2))
+            sub = self.font_tiny.render(f"({ctrl['sublabel']})", True, SIDEBAR_DIVIDER)
+            self.screen.blit(sub, (SIDEBAR_X + 60, row_y + 14))
+
+            # Current value (gold)
+            fmt_val = ctrl["fmt"].format(getattr(self, ctrl["attr"]))
+            val_surf = self.font_small.render(fmt_val, True, SIDEBAR_VALUE_COLOR)
+            self.screen.blit(val_surf, val_surf.get_rect(
+                centerx=SIDEBAR_X + 120, centery=row_y + 15))
+
+            # Dec button
+            dec_color = SIDEBAR_BTN_HOVER if rect_dec.collidepoint(mouse_pos) else SIDEBAR_BTN_COLOR
+            pygame.draw.rect(self.screen, dec_color, rect_dec, border_radius=4)
+            dec_lbl = self.font_small.render("-", True, SIDEBAR_BTN_TEXT)
+            self.screen.blit(dec_lbl, dec_lbl.get_rect(center=rect_dec.center))
+
+            # Inc button
+            inc_color = SIDEBAR_BTN_HOVER if rect_inc.collidepoint(mouse_pos) else SIDEBAR_BTN_COLOR
+            pygame.draw.rect(self.screen, inc_color, rect_inc, border_radius=4)
+            inc_lbl = self.font_small.render("+", True, SIDEBAR_BTN_TEXT)
+            self.screen.blit(inc_lbl, inc_lbl.get_rect(center=rect_inc.center))
 
     # ── Main loop ─────────────────────────────────────────────────────────────
 
