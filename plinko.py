@@ -54,6 +54,7 @@ MAX_MESSAGES         = 12
 ELASTICITY_MIN, ELASTICITY_MAX, ELASTICITY_STEP = 0.1, 1.5, 0.05
 GRAVITY_MIN,    GRAVITY_MAX,    GRAVITY_STEP    = 100, 2000, 50
 DAMPING_MIN,    DAMPING_MAX,    DAMPING_STEP    = 0.80, 1.00, 0.01
+BALL_RADIUS_MIN, BALL_RADIUS_MAX, BALL_RADIUS_STEP = 5, 30, 1
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -87,6 +88,7 @@ class PlinkoGame:
         self.ball_elasticity  = 0.75
         self.gravity_strength = 900
         self.damping_val      = 0.99
+        self.ball_radius      = BALL_RADIUS
 
         # settings controls: each dict describes one row
         self.settings_controls = [
@@ -122,6 +124,17 @@ class PlinkoGame:
                 "fmt":      "{:.2f}",
                 "rect_dec": pygame.Rect(SIDEBAR_X + 10, 490, 40, 30),
                 "rect_inc": pygame.Rect(SIDEBAR_X + 190, 490, 40, 30),
+            },
+            {
+                "label":    "Ball Radius",
+                "sublabel": "next ball",
+                "attr":     "ball_radius",
+                "min":      BALL_RADIUS_MIN,
+                "max":      BALL_RADIUS_MAX,
+                "step":     BALL_RADIUS_STEP,
+                "fmt":      "{:.0f}",
+                "rect_dec": pygame.Rect(SIDEBAR_X + 10, 565, 40, 30),
+                "rect_inc": pygame.Rect(SIDEBAR_X + 190, 565, 40, 30),
             },
         ]
 
@@ -240,10 +253,10 @@ class PlinkoGame:
         pygame_pos = (x_pygame, DROP_ZONE_HEIGHT // 2 + 10)
         pm_pos = pymunk.pygame_util.from_pygame(pygame_pos, self.screen)
 
-        moment = pymunk.moment_for_circle(BALL_MASS, 0, BALL_RADIUS)
+        moment = pymunk.moment_for_circle(BALL_MASS, 0, self.ball_radius)
         body   = pymunk.Body(BALL_MASS, moment)
         body.position = pm_pos
-        shape = pymunk.Circle(body, BALL_RADIUS)
+        shape = pymunk.Circle(body, self.ball_radius)
         shape.elasticity     = self.ball_elasticity
         shape.friction        = 0.4
         shape.collision_type  = 1
@@ -367,7 +380,7 @@ class PlinkoGame:
         if self.ball_body is None:
             return
         px, py = pymunk.pygame_util.to_pygame(self.ball_body.position, self.screen)
-        pygame.draw.circle(self.screen, BALL_COLOR, (px, py), BALL_RADIUS)
+        pygame.draw.circle(self.screen, BALL_COLOR, (px, py), self.ball_radius)
         # small highlight
         pygame.draw.circle(self.screen, (255, 255, 180), (px - 4, py - 4), 4)
 
@@ -479,6 +492,22 @@ class PlinkoGame:
             pygame.draw.rect(self.screen, inc_color, rect_inc, border_radius=4)
             inc_lbl = self.font_small.render("+", True, SIDEBAR_BTN_TEXT)
             self.screen.blit(inc_lbl, inc_lbl.get_rect(center=rect_inc.center))
+
+        self._draw_ball_preview()
+
+    def _draw_ball_preview(self):
+        preview_top = 610
+        pygame.draw.line(self.screen, SIDEBAR_DIVIDER,
+                         (SIDEBAR_X + 5, preview_top), (SIDEBAR_X + SIDEBAR_WIDTH - 5, preview_top), 1)
+        header = self.font_tiny.render("PREVIEW", True, SIDEBAR_HEADER_COLOR)
+        self.screen.blit(header, header.get_rect(centerx=SIDEBAR_X + SIDEBAR_WIDTH // 2,
+                                                  top=preview_top + 4))
+        cx = SIDEBAR_X + SIDEBAR_WIDTH // 2
+        cy = preview_top + 50
+        r  = self.ball_radius
+        pygame.draw.circle(self.screen, BALL_COLOR, (cx, cy), r)
+        pygame.draw.circle(self.screen, (255, 255, 180), (cx - max(2, r // 3), cy - max(2, r // 3)),
+                           max(2, r // 3))
 
     # ── Main loop ─────────────────────────────────────────────────────────────
 
