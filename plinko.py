@@ -14,7 +14,7 @@ PEG_AREA_TOP = DROP_ZONE_HEIGHT
 PEG_AREA_BOTTOM = HEIGHT - BUCKET_HEIGHT  # y=620
 
 PEG_RADIUS = 8
-BALL_RADIUS = 12
+BALL_RADIUS = 25
 BALL_MASS = 3
 NUM_BUCKETS = 7
 BUCKET_SCORES = [50, 100, 200, 500, 200, 100, 50]
@@ -150,6 +150,7 @@ class PlinkoGame:
         walls = [
             pymunk.Segment(sb, (0, 0), (0, HEIGHT), 2),
             pymunk.Segment(sb, (WIDTH, 0), (WIDTH, HEIGHT), 2),
+            pymunk.Segment(sb, (0, 0), (WIDTH, 0), 2),   # floor
         ]
         for w in walls:
             w.elasticity = 0.6
@@ -201,7 +202,6 @@ class PlinkoGame:
                     if self.scored_bucket is None:   # record only first hit
                         self.scored_bucket = idx
                         self.score = BUCKET_SCORES[idx]
-                        self._post_message(f"Scored {self.score} pts!")
 
         self.space.on_collision(1, 2, begin=begin)
 
@@ -310,6 +310,8 @@ class PlinkoGame:
                         self.space.remove(body, shape)
                     self.pegs.clear()
                     self._post_message("All pegs cleared")
+                elif event.key == pygame.K_x:
+                    self.messages.clear()
                 elif event.key == pygame.K_ESCAPE:
                     return False
 
@@ -365,7 +367,7 @@ class PlinkoGame:
         rect = pygame.Rect(0, 0, WIDTH, DROP_ZONE_HEIGHT)
         pygame.draw.rect(self.screen, DROP_ZONE_COLOR, rect)
         label = self.font_small.render(
-            "Click here or press Space to drop  •  R = reset ball  •  C = clear pegs",
+            "Space = drop  •  R = reset ball  •  C = clear pegs  •  X = clear messages",
             True, UI_TEXT_COLOR,
         )
         self.screen.blit(label, label.get_rect(center=(WIDTH // 2, DROP_ZONE_HEIGHT // 2)))
@@ -412,25 +414,11 @@ class PlinkoGame:
             cx = int((i + 0.5) * bucket_w)
             cy = bucket_top + BUCKET_HEIGHT // 2
 
-            if self.scored_bucket == i:
-                # gold highlight rectangle
-                pygame.draw.rect(
-                    self.screen, BUCKET_HIT_COLOR,
-                    pygame.Rect(int(i * bucket_w) + 2, bucket_top + 2,
-                                int(bucket_w) - 4, BUCKET_HEIGHT - 4),
-                    border_radius=4,
-                )
-                color = (30, 30, 30)
-            else:
-                color = BUCKET_LABEL_COLOR
-
-            label = self.font_medium.render(str(BUCKET_SCORES[i]), True, color)
+            label = self.font_medium.render(str(BUCKET_SCORES[i]), True, BUCKET_LABEL_COLOR)
             self.screen.blit(label, label.get_rect(center=(cx, cy)))
 
     def _draw_ui(self):
-        if self.score is not None:
-            banner = self.font_large.render(f"+ {self.score} points!", True, SCORE_TEXT_COLOR)
-            self.screen.blit(banner, banner.get_rect(center=(WIDTH // 2, DROP_ZONE_HEIGHT // 2)))
+        pass
 
     # ── Sidebar rendering ─────────────────────────────────────────────────────
 
